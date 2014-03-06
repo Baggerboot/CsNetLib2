@@ -19,10 +19,11 @@ namespace CsNetLib2
 		private byte[] buffer;
 		private TransferProtocol Protocol;
 
-		public event DataAvailabe OnDataAvailable;
-		public event BytesAvailable OnBytesAvailable;
+		public event DataAvailabeEvent OnDataAvailable;
+		public event BytesAvailableEvent OnBytesAvailable;
 		public event Disconnected OnDisconnect;
 		public event LogEvent OnLogEvent;
+		public event LocalPortKnownEvent OnLocalPortKnown;
 
 		public bool Connected { get { return Client.Connected; } }
 		public byte[] Delimiter
@@ -47,8 +48,10 @@ namespace CsNetLib2
 			}
 		}
 
-		public NetLibClient()
+		public NetLibClient(TransferProtocols protocol, Encoding encoding)
 		{
+			Protocol = new TransferProtocolFactory().CreateTransferProtocol(protocol, encoding, new Action<string>(Log));
+			Client = new TcpClient();
 			Delimiter = new byte[] { 13, 10 };
 		}
 
@@ -90,8 +93,16 @@ namespace CsNetLib2
 		}
 		public void Disconnect()
 		{
-            if (Client != null) Client.Close();
-			Console.WriteLine();
+			if (Client != null) {
+				Client.Close();
+				if (OnDisconnect != null) {
+					OnDisconnect();
+				}
+			}
+		}
+		public void DisconnectWithoutEvent()
+		{
+			if (Client != null) Client.Close();
 		}
 		public void SendCallback(IAsyncResult ar)
 		{
@@ -101,21 +112,34 @@ namespace CsNetLib2
 				ProcessDisconnect();
 			}
 		}
-		public async Task Connect(string hostname, int port, TransferProtocols protocol, Encoding encoding, bool useEvents = true)
+		public async Task ConnectAsync(string hostname, int port, bool useEvents = true)
 		{
-			Protocol = new TransferProtocolFactory().CreateTransferProtocol(protocol, encoding, new Action<string>(Log));
-			Client = new TcpClient();
 			Task t = Client.ConnectAsync(hostname, port);
 			await t;
+			if (OnLocalPortKnown != null) {
+				t = Task.Run(()=>OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
+			}
 			NetworkStream stream = Client.GetStream();
 			buffer = new byte[Client.ReceiveBufferSize];
 			if (useEvents) {
 				stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
 			}
 		}
+		public void Connect(string hostname, int port, bool useEvents = true)
+		{
+			Client.Connect(hostname, port);
+			if (OnLocalPortKnown != null) {
+				Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
+			}
+			NetworkStream stream = Client.GetStream();
+			buffer = new byte[Client.ReceiveBufferSize];
+			if (useEvents) {
+				stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
+			}
+		}
+
 		private void ReadCallback(IAsyncResult result)
 		{
-			Log("TRACE--> Read callback");
 			NetworkStream networkStream = null;
 			try {
 				networkStream = Client.GetStream();
@@ -133,11 +157,11 @@ namespace CsNetLib2
 			if (read == 0) {
 				Client.Close();
 			}
-			Log("TRACE--> Protocol handoff");
 			var containers = Protocol.ProcessData(buffer, read, 0);
 			foreach (var container in containers) {
 				if (OnDataAvailable != null) {
 					OnDataAvailable(container.Text, 0);
+				} if (OnBytesAvailable != null) {
 					OnBytesAvailable(container.Bytes, 0);
 				}
 			}
@@ -164,11 +188,6 @@ namespace CsNetLib2
 		public NetworkStream GetStream()
 		{
 			return Client.GetStream();
-		}
-
-		public void Close()
-		{
-			Client.Close();
 		}
 	}
 }

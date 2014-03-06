@@ -17,8 +17,8 @@ namespace CsNetLib2
 		private Dictionary<long, NetLibServerInternalClient> _clients = new Dictionary<long, NetLibServerInternalClient>();
 		private TransferProtocol Protocol;
 
-		public event DataAvailabe OnDataAvailable;
-		public event BytesAvailable OnBytesAvailable;
+		public event DataAvailabeEvent OnDataAvailable;
+		public event BytesAvailableEvent OnBytesAvailable;
 		public event ClientDisconnected OnClientDisconnected;
 		public event ClientConnected OnClientConnected;
 		public byte[] Delimiter
