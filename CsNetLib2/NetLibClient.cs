@@ -17,7 +17,7 @@ namespace CsNetLib2
 	{
 		public TcpClient Client { get; private set; }
 		private byte[] buffer;
-		private TransferProtocol Protocol;
+		private TransferProtocol protocol;
 
 		public event DataAvailabeEvent OnDataAvailable;
 		public event BytesAvailableEvent OnBytesAvailable;
@@ -25,13 +25,16 @@ namespace CsNetLib2
 		public event LogEvent OnLogEvent;
 		public event LocalPortKnownEvent OnLocalPortKnown;
 
+		private static int clientCount = 0;
+		private int clientNumber;
+
 		public bool Connected { get { return Client.Connected; } }
 		public byte[] Delimiter
 		{
 			get
 			{
 				try {
-					var protocol = (DelimitedProtocol)Protocol;
+					var protocol = (DelimitedProtocol)this.protocol;
 					return protocol.Delimiter;
 				} catch (InvalidCastException) {
 					throw new InvalidOperationException("Unable to set the delimiter: Protocol is not of type DelimitedProtocol");
@@ -40,7 +43,7 @@ namespace CsNetLib2
 			set
 			{
 				try {
-					var protocol = (DelimitedProtocol)Protocol;
+					var protocol = (DelimitedProtocol)this.protocol;
 					protocol.Delimiter = value;
 				} catch (InvalidCastException) {
 					throw new InvalidOperationException("Unable to set the delimiter: Protocol is not of type DelimitedProtocol");
@@ -48,11 +51,12 @@ namespace CsNetLib2
 			}
 		}
 
-		public NetLibClient(TransferProtocols protocol, Encoding encoding)
+		public NetLibClient(TransferProtocolType protocolType, Encoding encoding)
 		{
-			Protocol = new TransferProtocolFactory().CreateTransferProtocol(protocol, encoding, new Action<string>(Log));
+			this.protocol = new TransferProtocolFactory().CreateTransferProtocol(protocolType, encoding, new Action<string>(Log));
 			Client = new TcpClient();
 			Delimiter = new byte[] { 13, 10 };
+			clientNumber = ++clientCount;
 		}
 
 		private void Log(string message)
@@ -71,7 +75,7 @@ namespace CsNetLib2
 		}
 		public bool SendBytes(byte[] buffer)
 		{
-			buffer = Protocol.FormatData(buffer);
+			buffer = protocol.FormatData(buffer);
 			try {
 				Client.GetStream().BeginWrite(buffer, 0, buffer.Length, SendCallback, null);
 				return true;
@@ -88,7 +92,7 @@ namespace CsNetLib2
 		}
 		public bool Send(string data)
 		{
-			byte[] buffer = Protocol.EncodingType.GetBytes(data);
+			byte[] buffer = protocol.EncodingType.GetBytes(data);
 			return SendBytes(buffer);
 		}
 		public void Disconnect()
@@ -146,6 +150,10 @@ namespace CsNetLib2
 			} catch (ObjectDisposedException) {
 				ProcessDisconnect();
 				return;
+			} catch (InvalidOperationException) {
+				if (Connected) {
+					ProcessDisconnect();
+				}
 			}
 			int read;
 			try {
@@ -153,11 +161,17 @@ namespace CsNetLib2
 			} catch (System.IO.IOException) {
 				ProcessDisconnect();
 				return;
+			} catch (NullReferenceException e) {
+				if (Connected) {
+					throw e;
+				} else {
+					return;
+				}
 			}
 			if (read == 0) {
 				Client.Close();
 			}
-			var containers = Protocol.ProcessData(buffer, read, 0);
+			var containers = protocol.ProcessData(buffer, read, 0);
 			foreach (var container in containers) {
 				if (OnDataAvailable != null) {
 					OnDataAvailable(container.Text, 0);
@@ -182,7 +196,7 @@ namespace CsNetLib2
 		public List<DataContainer> Read()
 		{
 			int read = Client.GetStream().Read(buffer, 0, buffer.Length);
-			return Protocol.ProcessData(buffer, read, 0);
+			return protocol.ProcessData(buffer, read, 0);
 		}
 
 		public NetworkStream GetStream()

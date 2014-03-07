@@ -50,12 +50,12 @@ namespace CsNetLib2
             set { _clients = value; }
         }
 
-		public NetLibServer(int port, TransferProtocols protocol, Encoding encoding)
+		public NetLibServer(int port, TransferProtocolType protocol, Encoding encoding)
 			: this(IPAddress.Any, port, protocol, encoding) { }
-		public NetLibServer(IPAddress localaddr, int port, TransferProtocols protocol, Encoding encoding)
+		public NetLibServer(IPAddress localaddr, int port, TransferProtocolType protocol, Encoding encoding)
 		{
 			Protocol = new TransferProtocolFactory().CreateTransferProtocol(protocol, encoding, new Action<string>(Log));
-			if (protocol == TransferProtocols.Delimited) {
+			if (protocol == TransferProtocolType.Delimited) {
 				Delimiter = new byte[] { 13, 10 };
 			}
 			Listener = new TcpListener(localaddr, port);

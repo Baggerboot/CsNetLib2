@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace CsNetLib2
 {
-	public enum TransferProtocols
+	public enum TransferProtocolType
 	{
 		Streaming,
 		Delimited,
