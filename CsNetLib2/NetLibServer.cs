@@ -145,6 +145,7 @@ namespace CsNetLib2
 			foreach (var container in containers) {
 				if (OnDataAvailable != null) {
 					OnDataAvailable(container.Text, client.ClientId);
+				} if (OnBytesAvailable != null) {
 					OnBytesAvailable(container.Bytes, client.ClientId);
 				}
 			}
