@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 
 namespace CsNetLib2
 {
-	class SetSizeProtocol : TransferProtocol
+	class FixedSizeProtocol : TransferProtocol
 	{
-		public SetSizeProtocol(Encoding encoding) : base(encoding) { }
+		public FixedSizeProtocol(Encoding encoding) : base(encoding) { }
 
 		public override byte[] FormatData(byte[] data)
 		{

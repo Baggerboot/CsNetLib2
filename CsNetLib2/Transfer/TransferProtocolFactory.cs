@@ -15,8 +15,8 @@ namespace CsNetLib2
 					return new StreamingProtocol(encoding);
 				case TransferProtocolType.Delimited:
 					return new DelimitedProtocol(encoding, logCallback);
-				case TransferProtocolType.SetSize:
-					return new SetSizeProtocol(encoding);
+				case TransferProtocolType.FixedSize:
+					return new FixedSizeProtocol(encoding);
 				default:
 					return null;
 			}

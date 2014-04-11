@@ -4,12 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CsNetLib2
+namespace ClientTest
 {
-	public enum TransferProtocolType
+	class Program
 	{
-		Streaming,
-		Delimited,
-		FixedSize
+		static void Main(string[] args)
+		{
+		}
 	}
 }

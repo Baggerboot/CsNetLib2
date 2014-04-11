@@ -166,7 +166,7 @@ namespace CsNetLib2
 					_clients[clientId].NetworkStream.BeginWrite(buffer, 0, buffer.Length, SendCallback, clientId);
 					return true;
 				} catch (KeyNotFoundException) {
-					return false;
+					throw new ArgumentException(string.Format("Failed to send data to client: No client with clientId {0} exists", clientId));
 				} catch (NullReferenceException) {
 					HandleDisconnect(clientId);
 					return false;

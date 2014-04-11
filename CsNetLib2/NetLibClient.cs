@@ -121,7 +121,7 @@ namespace CsNetLib2
 			Task t = Client.ConnectAsync(hostname, port);
 			await t;
 			if (OnLocalPortKnown != null) {
-				t = Task.Run(()=>OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
+				t = Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
 			}
 			NetworkStream stream = Client.GetStream();
 			buffer = new byte[Client.ReceiveBufferSize];
@@ -131,14 +131,18 @@ namespace CsNetLib2
 		}
 		public void Connect(string hostname, int port, bool useEvents = true)
 		{
-			Client.Connect(hostname, port);
-			if (OnLocalPortKnown != null) {
-				Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
-			}
-			NetworkStream stream = Client.GetStream();
-			buffer = new byte[Client.ReceiveBufferSize];
-			if (useEvents) {
-				stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
+			if (Client.Connected) {
+				throw new InvalidOperationException("Unable to connect: client is already connected");
+			} else {
+				Client.Connect(hostname, port);
+				if (OnLocalPortKnown != null) {
+					Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
+				}
+				NetworkStream stream = Client.GetStream();
+				buffer = new byte[Client.ReceiveBufferSize];
+				if (useEvents) {
+					stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
+				}
 			}
 		}
 
