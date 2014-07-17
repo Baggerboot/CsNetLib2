@@ -51,10 +51,17 @@ namespace CsNetLib2
 			}
 		}
 
-		public NetLibClient(TransferProtocolType protocolType, Encoding encoding)
+		public NetLibClient(TransferProtocolType protocolType, Encoding encoding, IPEndPoint localEndPoint = null)
 		{
 			this.protocol = new TransferProtocolFactory().CreateTransferProtocol(protocolType, encoding, new Action<string>(Log));
-			Client = new TcpClient();
+			if (localEndPoint != null) {
+				Client = new TcpClient(localEndPoint);
+				Console.WriteLine("Setting endpoint to " + localEndPoint.ToString());
+				Console.WriteLine("EndPoint set to " + Client.Client.LocalEndPoint.ToString());
+			} else {
+				Client = new TcpClient();
+			}
+			
 			Delimiter = new byte[] { 13, 10 };
 			clientNumber = ++clientCount;
 		}
