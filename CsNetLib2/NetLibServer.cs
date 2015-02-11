@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
+using CsNetLib2.Transfer;
 
 namespace CsNetLib2
 {
@@ -13,9 +14,9 @@ namespace CsNetLib2
 
     public class NetLibServer : ITransmittable
     {
-		private TcpListener Listener;
+		private readonly TcpListener Listener;
 		private Dictionary<long, NetLibServerInternalClient> _clients = new Dictionary<long, NetLibServerInternalClient>();
-		private TransferProtocol Protocol;
+		private readonly TransferProtocol Protocol;
 
 		public event DataAvailabeEvent OnDataAvailable;
 		public event BytesAvailableEvent OnBytesAvailable;
@@ -65,17 +66,31 @@ namespace CsNetLib2
 		{
 			Console.WriteLine("Client #{0} disconnected", clientId);
 			lock (_clients) {
-				if (_clients.ContainsKey(clientId)) {
-					_clients[clientId].TcpClient.Close();
-					Clients.Remove(clientId);
-					if (OnClientDisconnected != null) OnClientDisconnected(clientId);
+				if (_clients != null) {
+					if (_clients.ContainsKey(clientId)) {
+						try {
+							_clients[clientId].TcpClient.Close();
+						} catch (NullReferenceException) {
+							// This client does not have a TcpClient reference anymore.
+						} catch (Exception e) {
+							// Something weird happened. We'd better report it. 
+							Console.WriteLine("Unable to close the TcpClient for client #{0}! Exception of type {1} occurred.", clientId, e);
+						}
+						// Regardless of what happens, we'll want to remove the client from the list, because at this point it's most certainly not functional anymore.
+						Clients.Remove(clientId);
+						if (OnClientDisconnected != null) OnClientDisconnected(clientId);
+					}
+				} else {
+					Console.WriteLine("ERROR: _clients variable is null");
 				}
 			}
 		}
 		public void CloseClientConnection(long clientId)
 		{
-			_clients[clientId].TcpClient.Close();
-			_clients.Remove(clientId);
+			lock (_clients) {
+				_clients[clientId].TcpClient.Close();
+				_clients.Remove(clientId);
+			}
 		}
 
 		private void Log(string message)
@@ -120,12 +135,12 @@ namespace CsNetLib2
 			var client = result.AsyncState as NetLibServerInternalClient;
 			if (client == null) return;
 			
-			int read = 0;
+			var read = 0;
 			NetworkStream networkStream;
 			try {
 				networkStream = client.NetworkStream;
 				read = networkStream.EndRead(result);
-			} catch (System.IO.IOException) {
+			} catch (IOException) {
 				HandleDisconnect(client.ClientId);
 				return;
 			} catch (ObjectDisposedException) {
@@ -152,7 +167,7 @@ namespace CsNetLib2
 
 			try {
 				networkStream.BeginRead(client.Buffer, 0, client.Buffer.Length, ReadCallback, client);
-			} catch (System.IO.IOException) {
+			} catch (IOException) {
 				HandleDisconnect(client.ClientId);
 			} catch (ObjectDisposedException) {
 				Console.WriteLine("Read callback dropped because client #{0} has disconnected.", (long)client.ClientId);
@@ -176,7 +191,7 @@ namespace CsNetLib2
 		}
 		public bool Send(string data, long clientId)
 		{
-			byte[] buffer = Protocol.EncodingType.GetBytes(data);
+			var buffer = Protocol.EncodingType.GetBytes(data);
 			return SendBytes(buffer, clientId);
 		}
 		private void SendCallback(IAsyncResult ar)
@@ -204,7 +219,7 @@ namespace CsNetLib2
 		}
 		public class NetLibServerInternalClient
 		{
-			private static long MaxClientId = 0;
+			private static long MaxClientId;
 			public long ClientId { get; private set; }
 			public TcpClient TcpClient { get; private set; }
 			public byte[] Buffer { get; private set; }

@@ -1,23 +1,25 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using System.Net;
 using System.Net.Sockets;
+using CsNetLib2.Transfer;
 
 namespace CsNetLib2
 {
 	public delegate void ClientDataAvailable(string data);
-	public delegate void Disconnected();
+	public delegate void Disconnected(Exception reason);
 	public delegate void LogEvent(string data);
 
 	public class NetLibClient : ITransmittable
 	{
 		public TcpClient Client { get; private set; }
 		private byte[] buffer;
-		private TransferProtocol protocol;
+		private readonly TransferProtocol protocol;
 
 		public event DataAvailabeEvent OnDataAvailable;
 		public event BytesAvailableEvent OnBytesAvailable;
@@ -25,8 +27,8 @@ namespace CsNetLib2
 		public event LogEvent OnLogEvent;
 		public event LocalPortKnownEvent OnLocalPortKnown;
 
-		private static int clientCount = 0;
-		private int clientNumber;
+		private static int clientCount;
+		private bool disconnectKnown;
 
 		public bool Connected { get { return Client.Connected; } }
 		public byte[] Delimiter
@@ -53,17 +55,15 @@ namespace CsNetLib2
 
 		public NetLibClient(TransferProtocolType protocolType, Encoding encoding, IPEndPoint localEndPoint = null)
 		{
-			this.protocol = new TransferProtocolFactory().CreateTransferProtocol(protocolType, encoding, new Action<string>(Log));
+			protocol = new TransferProtocolFactory().CreateTransferProtocol(protocolType, encoding, new Action<string>(Log));
 			if (localEndPoint != null) {
 				Client = new TcpClient(localEndPoint);
-				Console.WriteLine("Setting endpoint to " + localEndPoint.ToString());
-				Console.WriteLine("EndPoint set to " + Client.Client.LocalEndPoint.ToString());
 			} else {
 				Client = new TcpClient();
 			}
 			
 			Delimiter = new byte[] { 13, 10 };
-			clientNumber = ++clientCount;
+			++clientCount;
 		}
 
 		private void Log(string message)
@@ -73,11 +73,14 @@ namespace CsNetLib2
 			}
 		}
 
-		private void ProcessDisconnect()
+		private void ProcessDisconnect(Exception reason)
 		{
+			if (disconnectKnown) return;
+			disconnectKnown = true;
+
 			Client.Close();
 			if (OnDisconnect != null) {
-				OnDisconnect();
+				OnDisconnect(reason);
 			}
 		}
 		public bool SendBytes(byte[] buffer)
@@ -88,8 +91,8 @@ namespace CsNetLib2
 				return true;
 			} catch (NullReferenceException) {
 				return false;
-			} catch (InvalidOperationException) {
-				ProcessDisconnect();
+			} catch (InvalidOperationException e) {
+				ProcessDisconnect(e);
 				return false;
 			}
 		}
@@ -99,38 +102,42 @@ namespace CsNetLib2
 		}
 		public bool Send(string data)
 		{
-			byte[] buffer = protocol.EncodingType.GetBytes(data);
+			var buffer = protocol.EncodingType.GetBytes(data);
 			return SendBytes(buffer);
 		}
 		public void Disconnect()
 		{
 			if (Client != null) {
+				disconnectKnown = true;
 				Client.Close();
 				if (OnDisconnect != null) {
-					OnDisconnect();
+					OnDisconnect(null);
 				}
 			}
 		}
 		public void DisconnectWithoutEvent()
 		{
-			if (Client != null) Client.Close();
+			if (Client != null) {
+				disconnectKnown = true;
+				Client.Close();
+			}
 		}
 		public void SendCallback(IAsyncResult ar)
 		{
 			try {
 				Client.GetStream().EndWrite(ar);
-			} catch (ObjectDisposedException) {
-				ProcessDisconnect();
+			} catch (ObjectDisposedException e) {
+				ProcessDisconnect(e);
 			}
 		}
 		public async Task ConnectAsync(string hostname, int port, bool useEvents = true)
 		{
-			Task t = Client.ConnectAsync(hostname, port);
+			var t = Client.ConnectAsync(hostname, port);
 			await t;
 			if (OnLocalPortKnown != null) {
 				t = Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
 			}
-			NetworkStream stream = Client.GetStream();
+			var stream = Client.GetStream();
 			buffer = new byte[Client.ReceiveBufferSize];
 			if (useEvents) {
 				stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
@@ -140,44 +147,45 @@ namespace CsNetLib2
 		{
 			if (Client.Connected) {
 				throw new InvalidOperationException("Unable to connect: client is already connected");
-			} else {
-				Client.Connect(hostname, port);
-				if (OnLocalPortKnown != null) {
-					Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
-				}
-				NetworkStream stream = Client.GetStream();
-				buffer = new byte[Client.ReceiveBufferSize];
-				if (useEvents) {
-					stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
-				}
+			}
+
+			Client.Connect(hostname, port);
+			if (OnLocalPortKnown != null) {
+				Task.Run(() => OnLocalPortKnown(((IPEndPoint)Client.Client.LocalEndPoint).Port));
+			}
+			var stream = Client.GetStream();
+			buffer = new byte[Client.ReceiveBufferSize];
+			if (useEvents) {
+				stream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
 			}
 		}
 
 		private void ReadCallback(IAsyncResult result)
 		{
-			NetworkStream networkStream = null;
+			NetworkStream networkStream;
 			try {
 				networkStream = Client.GetStream();
-			} catch (ObjectDisposedException) {
-				ProcessDisconnect();
+			} catch (ObjectDisposedException e) {
+				ProcessDisconnect(e);
 				return;
-			} catch (InvalidOperationException) {
+			} catch (InvalidOperationException e) {
 				if (Connected) {
-					ProcessDisconnect();
+					ProcessDisconnect(e);
 				}
+				return;
 			}
 			int read;
 			try {
 				read = networkStream.EndRead(result);
-			} catch (System.IO.IOException) {
-				ProcessDisconnect();
+			} catch (IOException e) {
+				ProcessDisconnect(e);
 				return;
-			} catch (NullReferenceException e) {
+			} catch (NullReferenceException)
+			{
 				if (Connected) {
-					throw e;
-				} else {
-					return;
+					throw;
 				}
+				return;
 			}
 			if (read == 0) {
 				Client.Close();
@@ -192,21 +200,24 @@ namespace CsNetLib2
 			}
 			try {
 				networkStream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
-			} catch (ObjectDisposedException) {
-				ProcessDisconnect();
+			} catch (ObjectDisposedException e) {
+				ProcessDisconnect(e);
+				return;
+			} catch (IOException e) {
+				ProcessDisconnect(e);
 				return;
 			}
 		}
 		public void AwaitConnect()
 		{
 			while (!Client.Connected) {
-				System.Threading.Thread.Sleep(5);
+				Thread.Sleep(5);
 			}
 		}
 
 		public List<DataContainer> Read()
 		{
-			int read = Client.GetStream().Read(buffer, 0, buffer.Length);
+			var read = Client.GetStream().Read(buffer, 0, buffer.Length);
 			return protocol.ProcessData(buffer, read, 0);
 		}
 

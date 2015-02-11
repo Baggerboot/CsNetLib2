@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Generic;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace CsNetLib2
 {
@@ -10,7 +7,7 @@ namespace CsNetLib2
 	{
 		public Encoding EncodingType { get; private set; }
 
-		public TransferProtocol(Encoding encodingType)
+		protected TransferProtocol(Encoding encodingType)
 		{
 			EncodingType = encodingType;
 		}
