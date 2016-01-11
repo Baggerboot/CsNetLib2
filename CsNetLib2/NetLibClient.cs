@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using CsNetLib2.Transfer;
 
 using System.Net.Security;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 
 namespace CsNetLib2
@@ -114,7 +115,7 @@ namespace CsNetLib2
                     writeInProgress = true;
                     ConnectionStream.BeginWrite(buffer, 0, buffer.Length, SendCallback, null);
                 }
-                
+
                 return true;
             }
             catch (NullReferenceException)
@@ -228,12 +229,17 @@ namespace CsNetLib2
             }
             var sslStream = new SslStream(Client.GetStream(), false, validateServerCertificate ? new RemoteCertificateValidationCallback(ValidateServerCertificate) : null, null);
             var result = sslStream.AuthenticateAsClientAsync(hostname);
+
             ConnectionStream = sslStream;
 
             buffer = new byte[Client.ReceiveBufferSize];
             if (useEvents)
             {
                 await result;
+                Log(string.Format("SSL Connection established: Cipher: {1} ({0}-bit); KEX: {2} ({3}-bit); Hash: {4} ({5}-bit)",
+                    sslStream.CipherStrength, sslStream.CipherAlgorithm,
+                    sslStream.KeyExchangeAlgorithm, sslStream.KeyExchangeStrength,
+                    sslStream.HashAlgorithm, sslStream.HashStrength));
                 sslStream.BeginRead(buffer, 0, buffer.Length, ReadCallback, Client);
             }
         }
@@ -251,6 +257,10 @@ namespace CsNetLib2
             }
             var sslStream = new SslStream(Client.GetStream(), false, validateServerCertificate ? new RemoteCertificateValidationCallback(ValidateServerCertificate) : null, null);
             sslStream.AuthenticateAsClient(hostname);
+            Log(string.Format("SSL Connection established: Cipher: {0}-bit {1}; KEX: {2} {3}-bit; Hash: {4} {5}-bit",
+                sslStream.CipherStrength, sslStream.CipherAlgorithm,
+                sslStream.KeyExchangeAlgorithm, sslStream.KeyExchangeStrength,
+                sslStream.HashAlgorithm, sslStream.HashStrength));
             ConnectionStream = sslStream;
 
             buffer = new byte[Client.ReceiveBufferSize];
