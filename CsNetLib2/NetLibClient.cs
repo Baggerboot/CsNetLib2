@@ -111,30 +111,35 @@ namespace CsNetLib2
         public bool SendBytes(byte[] buffer)
         {
             buffer = protocol.FormatData(buffer);
-            try
-            {
-                while (writeInProgress)
-                {
-                    Log("Waiting for a previous write to finish before starting the next one...");
-                    Thread.Sleep(100);
-                }
-                lock (writeLock)
-                {
-                    writeInProgress = true;
-                    ConnectionStream.BeginWrite(buffer, 0, buffer.Length, SendCallback, null);
-                }
+	        try
+	        {
+		        while (writeInProgress)
+		        {
+			        Log("Waiting for a previous write to finish before starting the next one...");
+			        Thread.Sleep(100);
+		        }
+		        lock (writeLock)
+		        {
+			        writeInProgress = true;
+			        ConnectionStream.BeginWrite(buffer, 0, buffer.Length, SendCallback, null);
+		        }
 
-                return true;
-            }
-            catch (NullReferenceException)
-            {
-                return false;
-            }
-            catch (InvalidOperationException e)
-            {
-                ProcessDisconnect(e);
-                return false;
-            }
+		        return true;
+	        }
+	        catch (NullReferenceException)
+	        {
+		        return false;
+	        }
+	        catch (InvalidOperationException e)
+	        {
+		        ProcessDisconnect(e);
+		        return false;
+	        }
+	        catch (IOException e)
+	        {
+				ProcessDisconnect(e);
+		        return false;
+	        }
         }
 
         public bool Send(string data, long clientId)
@@ -182,19 +187,30 @@ namespace CsNetLib2
         /// <param name="ar"></param>
         private void SendCallback(IAsyncResult ar)
         {
-            try
-            {
-                ConnectionStream.EndWrite(ar);
-                // Allow the next write to take place
-                lock (writeLock)
-                {
-                    writeInProgress = false;
-                }
-            }
-            catch (ObjectDisposedException e)
-            {
-                ProcessDisconnect(e);
-            }
+	        try
+	        {
+		        ConnectionStream.EndWrite(ar);
+		        // Allow the next write to take place
+		        lock (writeLock)
+		        {
+			        writeInProgress = false;
+		        }
+	        }
+	        catch (ObjectDisposedException e)
+	        {
+		        ProcessDisconnect(e);
+	        }
+	        catch (IOException e)
+	        {
+		        if (e.GetType() == typeof (ObjectDisposedException))
+		        {
+			        ProcessDisconnect(e);
+		        }
+		        else
+		        {
+			        throw;
+		        }
+	        }
         }
 
         public async Task ConnectAsync(string hostname, int port, bool useEvents = true)
@@ -326,6 +342,8 @@ namespace CsNetLib2
                 // Shouldn't we do some disconnect handling here, as well as return from the method?
                 // This situation most likely never occurs, so put a Break() on it.
                 Debugger.Break();
+
+				ProcessDisconnect(new InvalidOperationException("End of stream reached."));
                 // If we can't do that, we'll have to throw, since we're not sure what to do at this point.
                 throw new InvalidOperationException("Unsupported read received. Connection state: " + (Connected ? "Connected" : "Disconnected"));
             }
