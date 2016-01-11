@@ -14,6 +14,12 @@ namespace CsNetLib2.Transfer
 		public DelimitedProtocol(Encoding encoding, Action<string> logCallback) : base(encoding) {
 		}
 
+        /// <summary>
+        /// Formats a message so it complies with this protocol.
+        /// It does so by adding the correct delimiter to the end of the byte array.
+        /// </summary>
+        /// <param name="data"></param>
+        /// <returns></returns>
 		public override byte[] FormatData(byte[] data)
 		{
 			var newData = new byte[data.Length + Delimiter.Length]; // Add space for delimiter
@@ -32,6 +38,7 @@ namespace CsNetLib2.Transfer
 				Array.Copy(retain, buffer, retain.Length); // Put the old data in first
 				Array.Copy(oldBuf, 0, buffer, retain.Length, read); // Now put the new data back in
 				read += retain.Length;
+                retain = new byte[0];
 			}
 
 			var beginIndex = 0; // This is where the next message starts
@@ -56,7 +63,7 @@ namespace CsNetLib2.Transfer
 						i--;
 					}
 				}
-				if (i == read) {
+				if (i == read - 1) {
 					retain = new byte[read - beginIndex];
 					Array.Copy(buffer, beginIndex, retain, 0, read - beginIndex); // Take any left over data and keep it for next usage
 				}
