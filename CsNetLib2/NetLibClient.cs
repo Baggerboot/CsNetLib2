@@ -349,13 +349,7 @@ namespace CsNetLib2
             if (read == 0)
             {
                 Client.Close();
-                // Shouldn't we do some disconnect handling here, as well as return from the method?
-                // This situation most likely never occurs, so put a Break() on it.
-                Debugger.Break();
-
 				ProcessDisconnect(new InvalidOperationException("End of stream reached."));
-                // If we can't do that, we'll have to throw, since we're not sure what to do at this point.
-                throw new InvalidOperationException("Unsupported read received. Connection state: " + (Connected ? "Connected" : "Disconnected"));
             }
             // Eventually we should just give the protocol a queue to read from, and shove it in there, 
             // which will allow us to return to reading the next data more quickly.
