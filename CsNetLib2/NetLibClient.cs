@@ -9,9 +9,7 @@ using System.Threading.Tasks;
 using CsNetLib2.Transfer;
 
 using System.Net.Security;
-using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
-using System.Diagnostics;
 
 namespace CsNetLib2
 {
