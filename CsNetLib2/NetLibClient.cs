@@ -354,7 +354,6 @@ namespace CsNetLib2
             var decodedMessage = protocol.EncodingType.GetString(readBuffer, 0, read);
 
             var containers = protocol.ProcessData(readBuffer, read, 0);
-
             lock (messageQueue)
             {
                 foreach (var container in containers)
@@ -363,10 +362,14 @@ namespace CsNetLib2
                 }
             }
             // Read's finished, so we should get started on the next one.
-            try
-            {
-                ConnectionStream.BeginRead(readBuffer, 0, readBuffer.Length, ReadCallback, Client);
-            }
+	        try
+	        {
+		        ConnectionStream.BeginRead(readBuffer, 0, readBuffer.Length, ReadCallback, Client);
+	        }
+	        catch (SocketException e)
+	        {
+		        ProcessDisconnect(e);
+	        }
             catch (ObjectDisposedException e)
             {
                 ProcessDisconnect(e);
