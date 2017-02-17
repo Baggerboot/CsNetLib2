@@ -301,9 +301,10 @@ namespace CsNetLib2
             var sslStream = new SslStream(Client.GetStream(), false, validateServerCertificate ? new RemoteCertificateValidationCallback(ValidateServerCertificate) : null, null);
             sslStream.AuthenticateAsClient(hostname);
 
+            var kex = (int) sslStream.KeyExchangeAlgorithm == 44550 ? "ECDH" : sslStream.KeyExchangeAlgorithm.ToString();
             Log(string.Format("SSL Connection established: Cipher: {0}-bit {1}; KEX: {2} {3}-bit; Hash: {4} {5}-bit",
                 sslStream.CipherStrength, sslStream.CipherAlgorithm,
-                sslStream.KeyExchangeAlgorithm, sslStream.KeyExchangeStrength,
+                kex, sslStream.KeyExchangeStrength,
                 sslStream.HashAlgorithm, sslStream.HashStrength));
             ConnectionStream = sslStream;
 
