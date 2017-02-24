@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using CsNetLib2.Transfer;
 
 using System.Net.Security;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 
 namespace CsNetLib2
@@ -23,9 +25,10 @@ namespace CsNetLib2
         private byte[] readBuffer;
         private readonly TransferProtocol protocol;
         private Stream ConnectionStream;
-        private object writeLock = new object();
-        private bool writeInProgress = false;
+
+        private Queue<byte[]> outgoingQueue = new Queue<byte[]>();
         private Queue<DataContainer> messageQueue = new Queue<DataContainer>();
+        private ManualResetEvent outgoingMessageAvailable = new ManualResetEvent(false);
 
         public event DataAvailabeEvent OnDataAvailable;
         public event BytesAvailableEvent OnBytesAvailable;
@@ -33,10 +36,9 @@ namespace CsNetLib2
         public event LogEvent OnLogEvent;
         public event LocalPortKnownEvent OnLocalPortKnown;
 
-        private static int clientCount;
         private bool disconnectKnown;
 
-        public bool Connected { get { return Client.Connected; } }
+        public bool Connected => Client.Connected;
         public int ReadLoopSleepTime { get; private set; }
         public byte[] Delimiter
         {
@@ -80,15 +82,11 @@ namespace CsNetLib2
             }
 
             Delimiter = new byte[] { 13, 10 };
-            ++clientCount;
         }
 
         private void Log(string message)
         {
-            if (OnLogEvent != null)
-            {
-                OnLogEvent(message);
-            }
+            OnLogEvent?.Invoke(message);
         }
 
         /// <summary>
@@ -101,44 +99,18 @@ namespace CsNetLib2
             disconnectKnown = true;
 
             Client.Close();
-            if (OnDisconnect != null)
-            {
-                OnDisconnect(reason);
-            }
+            OnDisconnect?.Invoke(reason);
         }
 
         public bool SendBytes(byte[] buffer)
         {
             buffer = protocol.FormatData(buffer);
-	        try
-	        {
-		        while (writeInProgress)
-		        {
-			        Log("Waiting for a previous write to finish before starting the next one...");
-			        Thread.Sleep(100);
-		        }
-		        lock (writeLock)
-		        {
-			        writeInProgress = true;
-			        ConnectionStream.BeginWrite(buffer, 0, buffer.Length, SendCallback, null);
-		        }
-
-		        return true;
-	        }
-	        catch (NullReferenceException)
-	        {
-		        return false;
-	        }
-	        catch (InvalidOperationException e)
-	        {
-		        ProcessDisconnect(e);
-		        return false;
-	        }
-	        catch (IOException e)
-	        {
-				ProcessDisconnect(e);
-		        return false;
-	        }
+            lock (outgoingMessageAvailable)
+            {
+                outgoingQueue.Enqueue(buffer);
+                outgoingMessageAvailable.Set();
+            }
+            return true;
         }
 
         public bool Send(string data, long clientId)
@@ -178,38 +150,6 @@ namespace CsNetLib2
                 disconnectKnown = true;
                 Client.Close();
             }
-        }
-
-        /// <summary>
-        /// Called when the client has finished sending data.
-        /// </summary>
-        /// <param name="ar"></param>
-        private void SendCallback(IAsyncResult ar)
-        {
-	        try
-	        {
-		        ConnectionStream.EndWrite(ar);
-		        // Allow the next write to take place
-		        lock (writeLock)
-		        {
-			        writeInProgress = false;
-		        }
-	        }
-	        catch (ObjectDisposedException e)
-	        {
-		        ProcessDisconnect(e);
-	        }
-	        catch (IOException e)
-	        {
-		        if (e.GetType() == typeof (ObjectDisposedException))
-		        {
-			        ProcessDisconnect(e);
-		        }
-		        else
-		        {
-			        throw;
-		        }
-	        }
         }
 
         public async Task ConnectAsync(string hostname, int port, bool useEvents = true)
@@ -301,7 +241,7 @@ namespace CsNetLib2
             var sslStream = new SslStream(Client.GetStream(), false, validateServerCertificate ? new RemoteCertificateValidationCallback(ValidateServerCertificate) : null, null);
             sslStream.AuthenticateAsClient(hostname);
 
-            var kex = (int) sslStream.KeyExchangeAlgorithm == 44550 ? "ECDH" : sslStream.KeyExchangeAlgorithm.ToString();
+            var kex = (int)sslStream.KeyExchangeAlgorithm == 44550 ? "ECDH" : sslStream.KeyExchangeAlgorithm.ToString();
             Log(string.Format("SSL Connection established: Cipher: {0}-bit {1}; KEX: {2} {3}-bit; Hash: {4} {5}-bit",
                 sslStream.CipherStrength, sslStream.CipherAlgorithm,
                 kex, sslStream.KeyExchangeStrength,
@@ -348,7 +288,7 @@ namespace CsNetLib2
             if (read == 0)
             {
                 Client.Close();
-				ProcessDisconnect(new InvalidOperationException("End of stream reached."));
+                ProcessDisconnect(new InvalidOperationException("End of stream reached."));
             }
             // Eventually we should just give the protocol a queue to read from, and shove it in there, 
             // which will allow us to return to reading the next data more quickly.
@@ -363,14 +303,14 @@ namespace CsNetLib2
                 }
             }
             // Read's finished, so we should get started on the next one.
-	        try
-	        {
-		        ConnectionStream.BeginRead(readBuffer, 0, readBuffer.Length, ReadCallback, Client);
-	        }
-	        catch (SocketException e)
-	        {
-		        ProcessDisconnect(e);
-	        }
+            try
+            {
+                ConnectionStream.BeginRead(readBuffer, 0, readBuffer.Length, ReadCallback, Client);
+            }
+            catch (SocketException e)
+            {
+                ProcessDisconnect(e);
+            }
             catch (ObjectDisposedException e)
             {
                 ProcessDisconnect(e);
@@ -385,29 +325,61 @@ namespace CsNetLib2
 
         private void EnterReadLoop()
         {
-            var t = new Thread(ReadLoop);
-            t.Name = "CSNetLib Message Processing Thread";
-            t.Start();
+            Task.Run((Action)ReadLoop);
+            Task.Run((Action)WriteLoop);
+        }
+
+        private void WriteLoop()
+        {
+            while (Connected || outgoingQueue.Count > 0)
+            {
+                byte[] buffer;
+                // Wait for a signal indicating that a message is available
+                outgoingMessageAvailable.WaitOne();
+                lock (outgoingMessageAvailable)
+                {
+                    buffer = new byte[outgoingQueue.Sum(m => m.Length)];
+                    var offset = 0;
+                    while (outgoingQueue.Count > 0)
+                    {
+                        var slice = outgoingQueue.Dequeue();
+                        Array.Copy(slice, 0, buffer, offset, slice.Length);
+                        offset += slice.Length;
+                    }
+                    // Reset the signal
+                    outgoingMessageAvailable.Reset();
+                }
+                try
+                {
+                    ConnectionStream.Write(buffer, 0, buffer.Length);
+                }
+                catch (NullReferenceException)
+                {
+                    // The connection has already been disposed
+                }
+                catch (InvalidOperationException e)
+                {
+                    ProcessDisconnect(e);
+                }
+                catch (IOException e)
+                {
+                    ProcessDisconnect(e);
+                }
+            }
         }
 
         private void ReadLoop()
         {
             while (Connected || messageQueue.Count > 0)
             {
-                
+
                 if (messageQueue.Count > 0)
                 {
                     Monitor.Enter(messageQueue);
                     var message = messageQueue.Dequeue();
                     Monitor.Exit(messageQueue);
-                    if (OnDataAvailable != null)
-                    {
-                        OnDataAvailable(message.Text, 0);
-                    }
-                    if (OnBytesAvailable != null)
-                    {
-                        OnBytesAvailable(message.Bytes, 0);
-                    }
+                    OnDataAvailable?.Invoke(message.Text, 0);
+                    OnBytesAvailable?.Invoke(message.Bytes, 0);
                 }
                 else
                 {
